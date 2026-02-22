@@ -275,9 +275,9 @@ function AddHoldingForm({ stock, onSubmit, onCancel, apiKey }) {
   useEffect(() => {
     if (!apiKey) return;
     setLoadingPrice(true);
-    fetch(`https://api.twelvedata.com/price?symbol=${stock.symbol}&apikey=${apiKey}`)
+    fetch(`https://api.twelvedata.com/quote?symbol=${stock.symbol}&apikey=${apiKey}`)
       .then((r) => r.json())
-      .then((data) => { if (data.price) setLivePrice(parseFloat(data.price)); })
+      .then((data) => { if (data.close) setLivePrice(parseFloat(data.close)); })
       .catch(() => {})
       .finally(() => setLoadingPrice(false));
   }, [stock.symbol, apiKey]);
@@ -422,16 +422,17 @@ export default function LemoneydPortfolio() {
     if (!apiKey || holdings.length === 0) return;
     setPricesLoading(true);
     try {
-      const symbols = [...new Set(holdings.map((h) => h.symbol))].join(",");
-      const res = await fetch(`https://api.twelvedata.com/price?symbol=${symbols}&apikey=${apiKey}`);
-      const data = await res.json();
+      const uniqueSymbols = [...new Set(holdings.map((h) => h.symbol))];
       const prices = {};
-      if (holdings.length === 1) {
-        if (data.price) prices[holdings[0].symbol] = parseFloat(data.price);
-      } else {
-        for (const sym of Object.keys(data)) {
-          if (data[sym]?.price) prices[sym] = parseFloat(data[sym].price);
-        }
+      // Use /quote endpoint for accurate close price
+      for (const sym of uniqueSymbols) {
+        try {
+          const res = await fetch(`https://api.twelvedata.com/quote?symbol=${sym}&apikey=${apiKey}`);
+          const data = await res.json();
+          if (data.close) {
+            prices[sym] = parseFloat(data.close);
+          }
+        } catch { /* skip */ }
       }
       setLivePrices(prices);
       setLastRefresh(new Date());
