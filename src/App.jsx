@@ -348,29 +348,80 @@ function AddHoldingForm({ stock, onSubmit, onCancel, apiKey }) {
 
 // ─── Holding Card ───
 
-function HoldingCard({ holding, onRemove, livePrice }) {
-  const currentPrice = livePrice || holding.executionPrice;
+function HoldingCard({ holding, onRemove, liveData }) {
+  const currentPrice = liveData ? liveData.price : holding.executionPrice;
   const totalCost = holding.shares * holding.executionPrice;
   const marketValue = holding.shares * currentPrice;
   const gainLoss = marketValue - totalCost;
   const gainLossPercent = totalCost > 0 ? ((gainLoss / totalCost) * 100) : 0;
   const isPositive = gainLoss >= 0;
-  const hasLive = livePrice !== null && livePrice !== undefined;
+  const hasLive = liveData !== null && liveData !== undefined;
   const daysSinceBuy = Math.floor((Date.now() - new Date(holding.dateBought).getTime()) / 86400000);
+
+  // Daily price change from quote endpoint
+  const dailyChange = liveData?.change ?? null;
+  const dailyPctChange = liveData?.percentChange ?? null;
+  const isDailyPositive = dailyChange !== null ? dailyChange >= 0 : true;
+  const isMarketOpen = liveData?.isMarketOpen ?? false;
 
   return (
     <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 20, border: `1px solid ${isPositive ? "#00c85322" : "#ff444422"}`, transition: "all 0.3s" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, fontSize: 20, color: "#ffd700", fontFamily: "'JetBrains Mono', monospace" }}>{holding.symbol}</span>
-            <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: isPositive ? "#00c85318" : "#ff444418", color: isPositive ? "#00c853" : "#ff4444", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{formatPercent(gainLossPercent)}</span>
-            {hasLive && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#00c853", animation: "pulse 2s infinite" }} />}
+            {dailyPctChange !== null && (
+              <span style={{
+                fontSize: 10, padding: "3px 8px", borderRadius: 6,
+                background: isDailyPositive ? "#00c85318" : "#ff444418",
+                color: isDailyPositive ? "#00c853" : "#ff4444",
+                fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+              }}>
+                {isDailyPositive ? "▲" : "▼"} {formatPercent(dailyPctChange)}
+              </span>
+            )}
+            {hasLive && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: isMarketOpen ? "#00c853" : "#ffd700", animation: isMarketOpen ? "pulse 2s infinite" : "none" }} />
+                <span style={{ fontSize: 9, color: isMarketOpen ? "#00c853" : "#ffd700", fontWeight: 600 }}>
+                  {isMarketOpen ? "LIVE" : "CLOSED"}
+                </span>
+              </div>
+            )}
           </div>
           <span style={{ fontSize: 12, color: "#666", marginTop: 2, display: "block" }}>{holding.name}</span>
         </div>
         <button onClick={() => onRemove(holding.id)} style={{ background: "transparent", border: "none", color: "#444", cursor: "pointer", fontSize: 16, padding: 4 }}>✕</button>
       </div>
+
+      {/* Daily Price Change Bar */}
+      {dailyChange !== null && (
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "8px 14px", background: isDailyPositive ? "#00c85308" : "#ff444408",
+          borderRadius: 10, marginBottom: 14,
+          border: `1px solid ${isDailyPositive ? "#00c85315" : "#ff444415"}`,
+        }}>
+          <span style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>Today's Change</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{
+              fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+              color: isDailyPositive ? "#00c853" : "#ff4444",
+            }}>
+              {isDailyPositive ? "+" : ""}{formatCurrency(dailyChange)}
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+              color: isDailyPositive ? "#00c853" : "#ff4444",
+              background: isDailyPositive ? "#00c85312" : "#ff444412",
+              padding: "2px 8px", borderRadius: 4,
+            }}>
+              {formatPercent(dailyPctChange)}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
         <div style={{ background: "#12121f", borderRadius: 10, padding: "10px 14px" }}>
           <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>Current Price {hasLive ? "" : "(est.)"}</div>
@@ -424,13 +475,19 @@ export default function LemoneydPortfolio() {
     try {
       const uniqueSymbols = [...new Set(holdings.map((h) => h.symbol))];
       const prices = {};
-      // Use /quote endpoint for accurate close price
+      // Use /quote endpoint for accurate close price + daily change
       for (const sym of uniqueSymbols) {
         try {
           const res = await fetch(`https://api.twelvedata.com/quote?symbol=${sym}&apikey=${apiKey}`);
           const data = await res.json();
           if (data.close) {
-            prices[sym] = parseFloat(data.close);
+            prices[sym] = {
+              price: parseFloat(data.close),
+              previousClose: data.previous_close ? parseFloat(data.previous_close) : null,
+              change: data.change ? parseFloat(data.change) : null,
+              percentChange: data.percent_change ? parseFloat(data.percent_change) : null,
+              isMarketOpen: data.is_market_open || false,
+            };
           }
         } catch { /* skip */ }
       }
@@ -446,7 +503,11 @@ export default function LemoneydPortfolio() {
     return () => clearInterval(interval);
   }, [fetchLivePrices]);
 
-  const totalMarketValue = holdings.reduce((sum, h) => sum + h.shares * (livePrices[h.symbol] || h.executionPrice), 0);
+  const totalMarketValue = holdings.reduce((sum, h) => {
+    const lp = livePrices[h.symbol];
+    const cp = lp ? lp.price : h.executionPrice;
+    return sum + h.shares * cp;
+  }, 0);
   const totalCost = holdings.reduce((sum, h) => sum + h.shares * h.executionPrice, 0);
   const totalGainLoss = totalMarketValue - totalCost;
   const totalGainPct = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
@@ -563,7 +624,7 @@ export default function LemoneydPortfolio() {
               <div>
                 <h3 style={{ fontSize: 14, fontWeight: 800, color: "#8888aa", marginBottom: 14 }}>Your Holdings</h3>
                 <div style={{ display: "grid", gap: 12 }}>
-                  {holdings.map((h) => <HoldingCard key={h.id} holding={h} livePrice={livePrices[h.symbol]} onRemove={(id) => setHoldings((prev) => prev.filter((x) => x.id !== id))} />)}
+                  {holdings.map((h) => <HoldingCard key={h.id} holding={h} liveData={livePrices[h.symbol]} onRemove={(id) => setHoldings((prev) => prev.filter((x) => x.id !== id))} />)}
                 </div>
               </div>
             )}
